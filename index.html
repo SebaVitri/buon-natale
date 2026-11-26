@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  
+  <!-- Anteprima per WhatsApp e Social -->
+  <title>🎄 Buon Natale 3D</title>
+  <meta property="og:title" content="🎄 Un pensiero speciale per te..." />
+  <meta property="og:description" content="Tocca qui per aprire l'albero di Natale 3D interattivo!" />
+  <meta property="og:type" content="website" />
+  <meta name="theme-color" content="#000000" />
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #000000;
+      color: #ffffff;
+      overflow: hidden;
+      font-family: 'Courier New', Courier, monospace;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100dvh;
+      touch-action: none;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    #audio-btn {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      color: #fff;
+      font-family: inherit;
+      font-size: 13px;
+      padding: 8px 12px;
+      border-radius: 20px;
+      cursor: pointer;
+      z-index: 10;
+      backdrop-filter: blur(4px);
+    }
+    #greeting {
+      position: fixed;
+      top: 12%;
+      width: 100%;
+      text-align: center;
+      font-size: clamp(18px, 5vw, 26px);
+      font-weight: bold;
+      letter-spacing: 3px;
+      color: #ffd700;
+      text-shadow: 0 0 12px rgba(255, 215, 0, 0.7);
+      pointer-events: none;
+      padding: 0 16px;
+    }
+    #hint {
+      position: fixed;
+      bottom: 16px;
+      width: 100%;
+      text-align: center;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.45);
+      pointer-events: none;
+      letter-spacing: 1px;
+    }
+  </style>
+</head>
+<body>
+  <button id="audio-btn">🔇 Musica</button>
+  <div id="greeting"></div>
+  <canvas id="canvas"></canvas>
+  <div id="hint">Trascina per ruotare • Doppio tocco per riavviare</div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const greetingEl = document.getElementById('greeting');
+    const audioBtn = document.getElementById('audio-btn');
+
+    // ==========================================
+    // PERSONALIZZA QUI IL TUO MESSAGGIO D'AUGURI
+    // ==========================================
+    const GREETING_TEXT = "BUON NATALE! ✨"; 
+
+    let width, height, scaleFactor, dpr;
+    function resize() {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      scaleFactor = Math.min(width, height) * 0.43;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Costanti scena 3D
+    const GROUND_Y = -0.82;
+    const TREE_HEIGHT = 1.62;
+    const BASE_RADIUS = 0.72;
+    const ASCII_RAMP = " .:-=+*#%@";
+
+    let points = [];
+    let stars = [];
+    let snow = [];
+    let startTime = performance.now();
+    let angleY = 0;
+    let autoRotateSpeed = 0.013;
+    let isDragging = false;
+    let lastTouchX = 0;
+
+    // 1. Stelle sullo sfondo + Fiocchi di neve
+    function initAtmosphere() {
+      stars = [];
+      for (let i = 0; i < 120; i++) {
+        stars.push({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          char: Math.random() > 0.75 ? '+' : '.',
+          alpha: 0.2 + Math.random() * 0.8,
+          twinkle: Math.random() * Math.PI * 2
+        });
+      }
+      snow = [];
+      for (let i = 0; i < 65; i++) {
+        snow.push({
+          x: (Math.random() - 0.5) * 3.2,
+          y: -1.0 + Math.random() * 2.8,
+          z: (Math.random() - 0.5) * 3.2,
+          speed: 0.004 + Math.random() * 0.007,
+          char: Math.random() > 0.5 ? '*' : '·'
+        });
+      }
+    }
+
+    // 2. Costruzione oggetti 3D
+    function buildScene() {
+      points = [];
+
+      // A) Albero a balze (t = 0.2 - 1.5s)
+      for (let i = 0; i < 2500; i++) {
+        const hNorm = Math.random();
+        const tier = (hNorm * 6) % 1;
+        const maxR = BASE_RADIUS * (1 - hNorm) * (0.76 + 0.26 * (1 - tier));
+        const r = maxR * Math.sqrt(0.2 + 0.8 * Math.random());
+        const theta = Math.random() * Math.PI * 2;
+
+        const x = r * Math.cos(theta);
+        const z = r * Math.sin(theta);
+        const y = GROUND_Y + 0.08 + hNorm * TREE_HEIGHT;
+
+        const shade = Math.random();
+        const color = shade > 0.65 ? '#39d353' : (shade > 0.3 ? '#26a641' : '#0e6b29');
+
+        points.push({
+          x, y, z,
+          nx: Math.cos(theta), ny: 0.35, nz: Math.sin(theta),
+          color,
+          glow: false,
+          revealTime: 0.2 + hNorm * 1.3
+        });
+      }
+
+      // B) Base innevata (t = 1.6 - 2.3s)
+      for (let i = 0; i < 950; i++) {
+        const r = Math.sqrt(Math.random()) * 1.15;
+        const theta = Math.random() * Math.PI * 2;
+        points.push({
+          x: r * Math.cos(theta),
+          y: GROUND_Y,
+          z: r * Math.sin(theta),
+          nx: 0, ny: 1, nz: 0,
+          color: r > 1.02 ? '#8bb8e8' : '#dce8f5',
+          glow: false,
+          revealTime: 1.6 + (r / 1.15) * 0.7
+        });
+      }
+
+      // C) Stella 3D a 5 punte ben definita (t = 2.4 - 2.9s)
+      const starTopY = GROUND_Y + 0.08 + TREE_HEIGHT + 0.13;
+      const spikes = 5;
+      const outerR = 0.16;
+      const innerR = 0.065;
+      for (let s = 0; s < spikes * 2; s++) {
+        const a1 = (s * Math.PI) / spikes + Math.PI / 2;
+        const a2 = ((s + 1) * Math.PI) / spikes + Math.PI / 2;
+        const r1 = s % 2 === 0 ? outerR : innerR;
+        const r2 = (s + 1) % 2 === 0 ? outerR : innerR;
+
+        for (let step = 0; step <= 14; step++) {
+          const t = step / 14;
+          const x = (1 - t) * (Math.cos(a1) * r1) + t * (Math.cos(a2) * r2);
+          const y = starTopY + (1 - t) * (Math.sin(a1) * r1) + t * (Math.sin(a2) * r2);
+          for (let zOff of [-0.015, 0, 0.015]) {
+            points.push({
+              x, y, z: zOff,
+              nx: 0, ny: 0.4, nz: 1,
+              color: '#ffd700',
+              glow: true,
+              revealTime: 2.4 + Math.random() * 0.4
+            });
+          }
+        }
+      }
+
+      // D) Festone rosso a spirale (t = 3.0 - 4.0s)
+      const garlandSteps = 340;
+      for (let i = 0; i < garlandSteps; i++) {
+        const t = i / garlandSteps;
+        const theta = t * Math.PI * 2 * 4.2;
+        const r = BASE_RADIUS * (1 - t) + 0.032;
+        const y = GROUND_Y + 0.12 + t * (TREE_HEIGHT - 0.12);
+
+        for (let k = 0; k < 2; k++) {
+          points.push({
+            x: r * Math.cos(theta),
+            y: y + (k - 0.5) * 0.024,
+            z: r * Math.sin(theta),
+            nx: Math.cos(theta), ny: 0.2, nz: Math.sin(theta),
+            color: '#ff3b30',
+            glow: false,
+            revealTime: 3.0 + t * 1.0
+          });
+        }
+      }
+
+      // E) Palline luminose (t = 4.2 - 5.8s)
+      const ornamentColors = ['#ff3b30', '#ffd60a', '#32ade6', '#ff9f0a', '#ffffff', '#ff2d55'];
+      const ornamentCount = 56;
+      for (let i = 0; i < ornamentCount; i++) {
+        const hNorm = 0.08 + Math.random() * 0.82;
+        const theta = Math.random() * Math.PI * 2;
+        const r = BASE_RADIUS * (1 - hNorm) + 0.025;
+        const cx = r * Math.cos(theta);
+        const cy = GROUND_Y + 0.1 + hNorm * TREE_HEIGHT;
+        const cz = r * Math.sin(theta);
+        const color = ornamentColors[i % ornamentColors.length];
+        const reveal = 4.2 + (i / ornamentCount) * 1.6;
+
+        for (let p = 0; p < 16; p++) {
+          const u = Math.random() * Math.PI * 2;
+          const v = Math.acos(2 * Math.random() - 1);
+          const rad = 0.036;
+          const dx = rad * Math.sin(v) * Math.cos(u);
+          const dy = rad * Math.sin(v) * Math.sin(u);
+          const dz = rad * Math.cos(v);
+
+          points.push({
+            x: cx + dx, y: cy + dy, z: cz + dz,
+            nx: dx / rad, ny: dy / rad, nz: dz / rad,
+            color,
+            glow: true,
+            revealTime: reveal
+          });
+        }
+      }
+
+      // F) Pacchi regalo con fiocco (t = 2.6 - 5.3s)
+      const gifts = [
+        { x: 0.35, z: 0.55, size: 0.18, box: '#0a84ff', ribbon: '#ffd60a', delay: 2.6 },
+        { x: 0.68, z: 0.22, size: 0.21, box: '#ff3b30', ribbon: '#ffd60a', delay: 3.3 },
+        { x: -0.58, z: 0.38, size: 0.19, box: '#bf5af2', ribbon: '#ffffff', delay: 3.9 },
+        { x: -0.22, z: 0.68, size: 0.16, box: '#ff9f0a', ribbon: '#ff3b30', delay: 4.5 },
+        { x: 0.12, z: 0.75, size: 0.15, box: '#30d158', ribbon: '#ffffff', delay: 5.0 },
+        { x: -0.72, z: -0.15, size: 0.20, box: '#ff2d55', ribbon: '#ffd60a', delay: 5.3 }
+      ];
+
+      gifts.forEach(g => {
+        const s = g.size / 2;
+        const step = 0.032;
+        for (let dx = -s; dx <= s; dx += step) {
+          for (let dy = 0; dy <= g.size; dy += step) {
+            for (let dz = -s; dz <= s; dz += step) {
+              if (Math.abs(Math.abs(dx) - s) < step || Math.abs(Math.abs(dz) - s) < step || dy > g.size - step) {
+                const isRibbon = Math.abs(dx) < 0.025 || Math.abs(dz) < 0.025;
+                points.push({
+                  x: g.x + dx,
+                  y: GROUND_Y + dy,
+                  z: g.z + dz,
+                  nx: dx, ny: 0.5, nz: dz,
+                  color: isRibbon ? g.ribbon : g.box,
+                  glow: false,
+                  revealTime: g.delay + Math.random() * 0.3
+                });
+              }
+            }
+          }
+        }
+      });
+    }
+
+    initAtmosphere();
+    buildScene();
+
+    // ==========================================
+    // CARILLON NATALIZIO GENERATO VIA WEB AUDIO
+    // ==========================================
+    let audioCtx = null;
+    let isPlaying = false;
+    let musicTimer = null;
+
+    const melody = [
+      [329.63, 0.25], [329.63, 0.25], [329.63, 0.5],
+      [329.63, 0.25], [329.63, 0.25], [329.63, 0.5],
+      [329.63, 0.25], [392.00, 0.25], [261.63, 0.35], [293.66, 0.15], [329.63, 0.8],
+      [349.23, 0.25], [349.23, 0.25], [349.23, 0.35], [349.23, 0.15],
+      [349.23, 0.25], [329.63, 0.25], [329.63, 0.25], [329.63, 0.25],
+      [329.63, 0.25], [293.66, 0.25], [293.66, 0.25], [329.63, 0.25], [293.66, 0.5], [392.00, 0.5]
+    ];
+
+    function toggleMusic() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (isPlaying) {
+        isPlaying = false;
+        clearTimeout(musicTimer);
+        audioBtn.textContent = "🔇 Musica";
+      } else {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        isPlaying = true;
+        audioBtn.textContent = "🔊 Musica";
+        let noteIdx = 0;
+        function playNext() {
+          if (!isPlaying) return;
+          const [freq, dur] = melody[noteIdx];
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur * 0.95);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + dur);
+
+          noteIdx = (noteIdx + 1) % melody.length;
+          musicTimer = setTimeout(playNext, dur * 1000 + 40);
+        }
+        playNext();
+      }
+    }
+    audioBtn.addEventListener('click', toggleMusic);
+
+    // Controlli Touch / Mouse
+    canvas.addEventListener('pointerdown', (e) => {
+      isDragging = true;
+      lastTouchX = e.clientX;
+    });
+    window.addEventListener('pointermove', (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - lastTouchX;
+      angleY += dx * 0.01;
+      lastTouchX = e.clientX;
+    });
+    window.addEventListener('pointerup', () => { isDragging = false; });
+
+    let lastTap = 0;
+    canvas.addEventListener('pointerup', () => {
+      const now = Date.now();
+      if (now - lastTap < 300) {
+        startTime = performance.now();
+      }
+      lastTap = now;
+    });
+
+    // Loop di rendering
+    function render(now) {
+      const elapsed = (now - startTime) / 1000;
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, width, height);
+
+      // Scritta augurale progressiva dopo 5.2 secondi
+      if (elapsed > 5.2) {
+        const charsToShow = Math.min(GREETING_TEXT.length, Math.floor((elapsed - 5.2) * 14));
+        greetingEl.textContent = GREETING_TEXT.slice(0, charsToShow);
+      } else {
+        greetingEl.textContent = "";
+      }
+
+      // Stelle sfondo
+      ctx.font = '11px monospace';
+      stars.forEach(st => {
+        const flicker = 0.4 + 0.6 * Math.sin(elapsed * 2.5 + st.twinkle);
+        ctx.fillStyle = `rgba(255, 255, 255, ${st.alpha * flicker})`;
+        ctx.fillText(st.char, st.x, st.y);
+      });
+
+      if (!isDragging) angleY += autoRotateSpeed;
+
+      const cosA = Math.cos(angleY);
+      const sinA = Math.sin(angleY);
+      const tilt = 0.28;
+      const cosT = Math.cos(tilt);
+      const sinT = Math.sin(tilt);
+      const lx = 0.5, ly = 0.7, lz = 0.8;
+      const cameraDist = 2.85;
+      const fov = scaleFactor * 1.95;
+
+      const projected = [];
+
+      // Proiezione punti scena
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        if (elapsed < p.revealTime) continue;
+
+        const rx = p.x * cosA - p.z * sinA;
+        const rz = p.x * sinA + p.z * cosA;
+        const ty = p.y * cosT - rz * sinT;
+        const tz = p.y * sinT + rz * cosT;
+
+        const zDepth = cameraDist - tz;
+        if (zDepth <= 0.1) continue;
+
+        const rnx = p.nx * cosA - p.nz * sinA;
+        const rnz = p.nx * sinA + p.nz * cosA;
+        const dot = Math.max(0.18, Math.min(1, (rnx * lx + p.ny * ly + rnz * lz)));
+        const charIdx = Math.min(ASCII_RAMP.length - 1, Math.floor(dot * ASCII_RAMP.length));
+
+        projected.push({
+          x: width / 2 + (rx * fov) / zDepth,
+          y: height / 2 - (ty * fov) / zDepth + height * 0.06,
+          z: zDepth,
+          char: ASCII_RAMP[charIdx],
+          color: p.color,
+          glow: p.glow,
+          size: Math.max(8, Math.round(23 / zDepth))
+        });
+      }
+
+      // Proiezione neve 3D
+      snow.forEach(s => {
+        s.y -= s.speed;
+        if (s.y < -1.0) s.y = 1.6;
+        const rx = s.x * cosA - s.z * sinA;
+        const rz = s.x * sinA + s.z * cosA;
+        const ty = s.y * cosT - rz * sinT;
+        const tz = s.y * sinT + rz * cosT;
+        const zDepth = cameraDist - tz;
+        if (zDepth > 0.2) {
+          projected.push({
+            x: width / 2 + (rx * fov) / zDepth,
+            y: height / 2 - (ty * fov) / zDepth + height * 0.06,
+            z: zDepth,
+            char: s.char,
+            color: 'rgba(255, 255, 255, 0.65)',
+            glow: false,
+            size: Math.max(8, Math.round(18 / zDepth))
+          });
+        }
+      });
+
+      projected.sort((a, b) => b.z - a.z);
+
+      for (let i = 0; i < projected.length; i++) {
+        const pt = projected[i];
+        ctx.font = `bold ${pt.size}px "Courier New", monospace`;
+        ctx.fillStyle = pt.color;
+        if (pt.glow) {
+          ctx.shadowColor = pt.color;
+          ctx.shadowBlur = 8;
+        } else {
+          ctx.shadowBlur = 0;
+        }
+        ctx.fillText(pt.char, pt.x, pt.y);
+      }
+      ctx.shadowBlur = 0;
+
+      requestAnimationFrame(render);
+    }
+
+    requestAnimationFrame(render);
+  </script>
+</body>
+</html>
